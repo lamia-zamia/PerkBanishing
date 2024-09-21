@@ -51,7 +51,6 @@ do --helpers
 			if preset and preset ~= "" then
 				local values = {}
 				for value in preset:gmatch("([^,]+)") do
-					print(value)
 					values[#values + 1] = value
 				end
 				local name = table.remove(values, 1)
@@ -74,7 +73,6 @@ do --helpers
 		local preset = U.presets[name]
 		for i = 1, #perk_list do
 			if U.get_setting(perk_list[i].id) then
-				print(perk_list[i].id)
 				preset[#preset + 1] = perk_list[i].id
 			end
 		end
@@ -224,7 +222,7 @@ do -- Settings GUI
 			end
 			local color = name == display_name and { 1, 1, 1 } or { 0.4, 0.7, 0.4 }
 			if G.button(gui, 0, T.update_preset, color) then
-				-- U.presets[display_name] = U.presets[name]
+				if display_name == "" then display_name = "error_" .. i .. "!" end
 				U.presets[name] = nil
 				U.preset_names[name] = nil
 				U.write_preset(display_name)
