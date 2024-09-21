@@ -2,9 +2,7 @@ dofile_once("data/scripts/lib/mod_settings.lua")
 
 local mod_id = "PerkBanishing"
 local setting_prfx = mod_id .. "."
-local show_window = false
 local T = {}
-local D = {}
 local gui_id = 1000
 local function id()
 	gui_id = gui_id + 1
@@ -15,27 +13,13 @@ end
 -- ###########################################
 
 local U = {
-	offset = 0,
+	offset = 4,
+	presets = {},
+	preset_names = {},
+	show_window = false,
+	chars = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ_abcdefghijklmnopqrstuvwxyz"
 }
 do --helpers
-	---@param gui gui
-	---@param array mod_settings_global|mod_settings
-	---@return number
-	function U.calculate_elements_offset(gui, array)
-		local max_width = 10
-		for _, setting in ipairs(array) do
-			if setting.category_id then
-				cat_max_width = U.calculate_elements_offset(gui, setting.settings)
-				max_width = math.max(max_width, cat_max_width)
-			end
-			if setting.ui_name then
-				local name_length = GuiGetTextDimensions(gui, setting.ui_name)
-				max_width = math.max(max_width, name_length)
-			end
-		end
-		return max_width + 3
-	end
-
 	---@param setting_name setting_id
 	---@param value setting_value
 	function U.set_setting(setting_name, value)
@@ -59,6 +43,52 @@ do --helpers
 			U.remove_setting(perk_list[i].id)
 		end
 	end
+
+	function U.read_presets()
+		local struct = tostring(U.get_setting("presets"))
+		if not struct then return end
+		for preset in struct:gmatch("([^\n]*)\n?") do
+			if preset and preset ~= "" then
+				local values = {}
+				for value in preset:gmatch("([^,]+)") do
+					print(value)
+					values[#values + 1] = value
+				end
+				local name = table.remove(values, 1)
+				U.preset_names[name] = name
+				U.presets[name] = values
+			end
+		end
+	end
+
+	function U.write_presets()
+		local presets = ""
+		for name, values in pairs(U.presets) do
+			presets = presets .. name .. "," .. table.concat(values, ",") .. "\n"
+		end
+		U.set_setting("presets", presets)
+	end
+
+	function U.write_preset(name)
+		U.presets[name] = {}
+		local preset = U.presets[name]
+		for i = 1, #perk_list do
+			if U.get_setting(perk_list[i].id) then
+				print(perk_list[i].id)
+				preset[#preset + 1] = perk_list[i].id
+			end
+		end
+		U.preset_names[name] = name
+		U.write_presets()
+	end
+
+	function U.apply_preset(name)
+		local preset = U.presets[name]
+		U.reset_settings()
+		for i = 1, #preset do
+			U.set_setting(preset[i], true)
+		end
+	end
 end
 -- ###########################################
 -- ##########		GUI Helpers		##########
@@ -80,54 +110,7 @@ do --gui helpers
 		if hovered then GuiColorSetForNextWidget(gui, 1, 1, 0.7, 1) end
 	end
 
-	---@param gui gui
-	---@param setting_name setting_id
-	function G.toggle_checkbox_boolean(gui, setting_name)
-		local text = T[setting_name]
-		local _, _, _, prev_x, y, prev_w = GuiGetPreviousWidgetInfo(gui)
-		local x = prev_x + prev_w + 1
-		local value = U.get_setting(setting_name)
-		local offset_w = GuiGetTextDimensions(gui, text) + 8
-
-		GuiZSetForNextWidget(gui, -1)
-		G.button_options(gui)
-		GuiImageNinePiece(gui, id(), x + 2, y, offset_w, 10, 0) --hover box
-		local _, _, hovered = GuiGetPreviousWidgetInfo(gui)
-		GuiZSetForNextWidget(gui, 1)
-		GuiImageNinePiece(gui, id(), x + 2, y + 2, 6, 6) --check box
-
-		GuiText(gui, 4, 0, "")
-		if value then
-			GuiColorSetForNextWidget(gui, 0, 0.8, 0, 1)
-			GuiText(gui, 0, 0, "V")
-			GuiText(gui, 0, 0, " ")
-			G.yellow_if_hovered(gui, hovered)
-		else
-			GuiColorSetForNextWidget(gui, 0.8, 0, 0, 1)
-			GuiText(gui, 0, 0, "X")
-			GuiText(gui, 0, 0, " ")
-			G.yellow_if_hovered(gui, hovered)
-		end
-		GuiText(gui, 0, 0, text)
-		if hovered then
-			G.on_clicks(setting_name, not value, D[setting_name])
-		end
-	end
-
-	---@param setting_name setting_id
-	---@param value setting_value
-	---@param default setting_value
-	function G.on_clicks(setting_name, value, default)
-		if InputIsMouseButtonJustDown(1) then
-			U.set_setting(setting_name, value)
-		end
-		if InputIsMouseButtonJustDown(2) then
-			GamePlaySound("ui", "ui/button_click", 0, 0)
-			U.set_setting(setting_name, default)
-		end
-	end
-
-	function G.display_perk_window(_, gui, _, _, setting)
+	function G.display_perk_window(gui)
 		local start_x = 510
 		local start_y = 60
 		local box_height = 200
@@ -170,6 +153,30 @@ do --gui helpers
 		end
 		GuiEndScrollContainer(gui)
 	end
+
+	---@param gui gui
+	---@param x_pos number
+	---@param text string
+	---@param color? table
+	---@return boolean
+	---@nodiscard
+	function G.button(gui, x_pos, text, color)
+		GuiOptionsAddForNextWidget(gui, GUI_OPTION.Layout_NextSameLine)
+		GuiText(gui, x_pos, 0, "")
+		local _, _, _, x, y = GuiGetPreviousWidgetInfo(gui)
+		text = "[" .. text .. "]"
+		local width, height = GuiGetTextDimensions(gui, text)
+		G.button_options(gui)
+		GuiImageNinePiece(gui, id(), x, y, width, height, 0)
+		local clicked, _, hovered = GuiGetPreviousWidgetInfo(gui)
+		if color then
+			local r, g, b = unpack(color)
+			GuiColorSetForNextWidget(gui, r, g, b, 1)
+		end
+		G.yellow_if_hovered(gui, hovered)
+		GuiText(gui, x_pos, 0, text)
+		return clicked
+	end
 end
 -- ###########################################
 -- ########		Settings GUI		##########
@@ -179,64 +186,59 @@ local S = {
 
 }
 do -- Settings GUI
-	function S.mod_setting_better_boolean(_, gui, _, _, setting)
-		GuiOptionsAddForNextWidget(gui, GUI_OPTION.Layout_NextSameLine)
-		GuiText(gui, mod_setting_group_x_offset, 0, setting.ui_name)
-		GuiLayoutBeginHorizontal(gui, U.offset, 0, true, 0, 0)
-		GuiText(gui, 7, 0, "")
-		for _, setting_id in ipairs(setting.checkboxes) do
-			G.toggle_checkbox_boolean(gui, setting_id)
-		end
-		GuiLayoutEnd(gui)
-	end
-
 	function S.toggle_display(_, gui, _, _, setting)
-		if not U.get_setting("enable_mod") then return end
-		GuiOptionsAddForNextWidget(gui, GUI_OPTION.Layout_NextSameLine)
-		GuiText(gui, 0, 0, "")
-		local _, _, _, x, y = GuiGetPreviousWidgetInfo(gui)
-		local text = "[" .. (show_window and T["hide"] or T["show"]) .. " " .. T["window"] .. "]"
-		local width, height = GuiGetTextDimensions(gui, text)
-		G.button_options(gui)
-		GuiImageNinePiece(gui, id(), x, y, width, height, 0)
-		local clicked, _, hovered = GuiGetPreviousWidgetInfo(gui)
-		G.yellow_if_hovered(gui, hovered)
-		GuiText(gui, 0, 0, text)
-		if clicked then
-			show_window = not show_window
+		if G.button(gui, U.offset, (U.show_window and T["hide"] or T["show"]) .. " " .. T["window"]) then
+			U.show_window = not U.show_window
 		end
-		if show_window then G.display_perk_window(_, gui, _, _, setting) end
+		if U.show_window then G.display_perk_window(gui) end
 	end
 
 	function S.show_message(_, gui, _, _, _)
-		if not U.get_setting("enable_mod") then
-			GuiColorSetForNextWidget(gui, 0.6, 0.6, 0.6, 1)
-			GuiText(gui, 0, 0, T.disabled)
-			return
-		end
 		if ModIsEnabled(mod_id) then
 			GuiColorSetForNextWidget(gui, 0.6, 0.6, 0.6, 1)
-			GuiText(gui, 0, 0, T.next)
+			GuiText(gui, U.offset, 0, T.next)
 		else
 			GuiColorSetForNextWidget(gui, 1, 0.4, 0.4, 1)
-			GuiText(gui, 0, 0, T.load)
+			GuiText(gui, U.offset, 0, T.load)
 		end
 	end
 
 	function S.reset_settings(_, gui, _, _, _)
-		if not U.get_setting("enable_mod") then return end
-		GuiOptionsAddForNextWidget(gui, GUI_OPTION.Layout_NextSameLine)
-		GuiText(gui, 0, 0, "")
-		local _, _, _, x, y = GuiGetPreviousWidgetInfo(gui)
-		local text = "[" .. T.reset .. "]"
-		local width, height = GuiGetTextDimensions(gui, text)
-		G.button_options(gui)
-		GuiImageNinePiece(gui, id(), x, y, width, height, 0)
-		local clicked, _, hovered = GuiGetPreviousWidgetInfo(gui)
-		G.yellow_if_hovered(gui, hovered)
-		GuiText(gui, 0, 0, text)
-		if clicked then
+		if G.button(gui, U.offset, T.reset_settings) then
 			U.reset_settings()
+		end
+		if G.button(gui, U.offset, T.erase_presets, { 1, 0.4, 0.4 }) then
+			U.presets = {}
+			U.write_presets()
+			U.read_presets()
+		end
+	end
+
+	function S.presets(_, gui, _, _, _)
+		local i = 1
+		for name, display_name in pairs(U.preset_names) do
+			GuiLayoutBeginHorizontal(gui, U.offset * 2, 0, true, 0, 0)
+			U.preset_names[name] = GuiTextInput(gui, id(), 0, 0, display_name, 90, 17, U.chars)
+			if G.button(gui, 0, T.apply_preset) then
+				U.apply_preset(name)
+			end
+			local color = name == display_name and { 1, 1, 1 } or { 0.4, 0.7, 0.4 }
+			if G.button(gui, 0, T.update_preset, color) then
+				-- U.presets[display_name] = U.presets[name]
+				U.presets[name] = nil
+				U.preset_names[name] = nil
+				U.write_preset(display_name)
+			end
+			if G.button(gui, 0, T.delete_preset, { 1, 0.4, 0.4 }) then
+				U.presets[name] = nil
+				U.preset_names[name] = nil
+				U.write_presets()
+			end
+			GuiLayoutEnd(gui)
+			i = i + 1
+		end
+		if G.button(gui, U.offset * 2, T.new_preset) then
+			U.write_preset("Preset_" .. i)
 		end
 	end
 end
@@ -253,12 +255,17 @@ local translations =
 		window = "banishing window",
 		name = "Banish Perks",
 		did = "Banished",
-		mod_state = "State",
-		enable_mod = "Enabled",
 		load = "Load the game to see modded perks",
 		next = "Mod is loaded, perks will be banished on next run",
 		disabled = "Mod is disabled",
-		reset = "Reset Settings",
+		reset_cat = "Reset",
+		reset_settings = "Allow all perks",
+		presets_cat = "Presets",
+		new_preset = "New Preset",
+		erase_presets = "Erase presets",
+		apply_preset = "Apply",
+		update_preset = "Update",
+		delete_preset = "Delete",
 	}
 }
 
@@ -286,13 +293,6 @@ local function build_settings()
 	---@type mod_settings_global
 	local settings = {
 		{
-			not_setting = true,
-			id = "mod_state",
-			ui_fn = S.mod_setting_better_boolean,
-			ui_name = T.enable_mod,
-			checkboxes = { "enable_mod" },
-		},
-		{
 			ui_fn = S.toggle_display,
 			not_setting = true,
 		},
@@ -301,11 +301,32 @@ local function build_settings()
 			not_setting = true
 		},
 		{
-			ui_fn = S.reset_settings,
-			not_setting = true
+			category_id = "presets",
+			ui_name = T.presets_cat,
+			foldable = true,
+			_folded = true,
+			settings = {
+				{
+					ui_fn = S.presets,
+					not_setting = true
+				}
+			}
 		},
+		{
+			category_id = "reset",
+			ui_name = T.reset_cat,
+			foldable = true,
+			_folded = true,
+			settings = {
+				{
+					ui_fn = S.reset_settings,
+					not_setting = true
+				},
+			}
+
+		},
+
 	}
-	U.offset = 0
 	return settings
 end
 
@@ -333,12 +354,12 @@ end
 function ModSettingsGui(gui, in_main_menu)
 	gui_id = 1000
 	GuiIdPushString(gui, setting_prfx)
-	if U.offset == 0 then U.offset = U.calculate_elements_offset(gui, mod_settings) end
 	mod_settings_gui(mod_id, mod_settings, gui, in_main_menu)
 	GuiIdPop(gui)
 end
 
 dofile("data/scripts/perks/perk_list.lua")
+U.read_presets()
 
 ---@type mod_settings_global
 mod_settings = build_settings()
