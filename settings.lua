@@ -334,6 +334,8 @@ end
 
 ---@param init_scope number
 function ModSettingsUpdate(init_scope)
+	dofile("data/scripts/perks/perk_list.lua")
+	U.read_presets()
 	local current_language = GameTextGetTranslatedOrNot("$current_language")
 	if current_language ~= current_language_last_frame then
 		mod_settings = build_settings()
@@ -356,8 +358,6 @@ function ModSettingsGui(gui, in_main_menu)
 	GuiIdPop(gui)
 end
 
-dofile("data/scripts/perks/perk_list.lua")
-U.read_presets()
 
 ---@type mod_settings_global
 mod_settings = build_settings()
